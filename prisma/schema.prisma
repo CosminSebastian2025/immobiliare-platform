@@ -1,0 +1,613 @@
+// prisma/schema.prisma
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ============================================
+// UTENTI E AUTENTICAZIONE
+// ============================================
+
+enum UserRole {
+  PRIVATE // Privato cittadino
+  AGENCY // Agenzia immobiliare
+  ADMIN // Amministratore
+}
+
+enum UserStatus {
+  ACTIVE
+  SUSPENDED
+  BANNED
+  PENDING_VERIFICATION
+}
+
+model User {
+  id            String     @id @default(cuid())
+  email         String     @unique
+  emailVerified DateTime?
+  password      String? // Hashed password (null per OAuth)
+  name          String?
+  image         String?
+  role          UserRole   @default(PRIVATE)
+  status        UserStatus @default(PENDING_VERIFICATION)
+  phone         String?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  // Relazioni
+  accounts          Account[]
+  sessions          Session[]
+  profile           Profile?
+  listings          Listing[]
+  favorites         Favorite[]
+  inquiriesSent     Inquiry[]     @relation("SentInquiries")
+  inquiriesReceived Inquiry[]     @relation("ReceivedInquiries")
+  subscription      Subscription?
+  messages          Message[]     @relation("SentMessages")
+  receivedMessages  Message[]     @relation("ReceivedMessages")
+
+  @@map("users")
+}
+
+model Profile {
+  id     String @id @default(cuid())
+  userId String @unique
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Dati personali
+  fullName String?
+  bio      String?
+  avatar   String?
+
+  // Dati agenzia (se role = AGENCY)
+  agencyName String?
+  vatNumber  String? // Partita IVA
+  website    String?
+  license    String? // Numero licenza agente immobiliare
+
+  // Verifica
+  verified   Boolean   @default(false)
+  verifiedAt DateTime?
+
+  // Localizzazione
+  city   String?
+  region String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("profiles")
+}
+
+// NextAuth tables
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+// ============================================
+// ANNUNCI IMMOBILIARI
+// ============================================
+
+enum ListingType {
+  SALE // Vendita
+  RENT_SHORT // Affitto breve (< 30 giorni)
+  RENT_LONG // Affitto lungo (> 30 giorni)
+  ROOM // Camera singola
+}
+
+enum PropertyType {
+  APARTMENT // Appartamento
+  HOUSE // Casa indipendente
+  VILLA // Villa
+  ROOM // Camera
+  STUDIO // Monolocale
+  LOFT // Loft
+  LAND // Terreno
+  COMMERCIAL // Commerciale
+  GARAGE // Garage/Box
+}
+
+enum ListingStatus {
+  DRAFT // Bozza
+  PUBLISHED // Pubblicato
+  PENDING // In attesa di approvazione
+  REJECTED // Rifiutato
+  ARCHIVED // Archiviato
+  SOLD // Venduto
+  RENTED // Affittato
+}
+
+enum EnergyClass {
+  A4
+  A3
+  A2
+  A1
+  B
+  C
+  D
+  E
+  F
+  G
+}
+
+model Listing {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  // Info base
+  title        String
+  slug         String        @unique
+  description  String        @db.Text
+  listingType  ListingType
+  propertyType PropertyType
+  status       ListingStatus @default(DRAFT)
+
+  // Prezzo
+  price       Int // in centesimi (es. 150000 = 1500.00€)
+  pricePeriod String? // "month", "night", null per vendita
+
+  // Caratteristiche
+  rooms       Int?
+  bedrooms    Int?
+  bathrooms   Int?
+  sqm         Int? // Metri quadri
+  floor       Int?
+  totalFloors Int?
+  yearBuilt   Int?
+
+  // Classe energetica
+  energyClass EnergyClass?
+
+  // Dotazioni
+  furnished       Boolean @default(false)
+  elevator        Boolean @default(false)
+  parking         Boolean @default(false)
+  garden          Boolean @default(false)
+  balcony         Boolean @default(false)
+  terrace         Boolean @default(false)
+  basement        Boolean @default(false)
+  airConditioning Boolean @default(false)
+  heating         Boolean @default(false)
+  petsAllowed     Boolean @default(false)
+  accessible      Boolean @default(false) // Accessibile disabili
+
+  // Disponibilità
+  availableFrom DateTime?
+  availableTo   DateTime? // Solo per affitti brevi
+
+  // Localizzazione
+  latitude  Float?
+  longitude Float?
+
+  // Flags
+  featured Boolean @default(false)
+  verified Boolean @default(false)
+
+  // Statistiche
+  views Int @default(0)
+
+  // Timestamps
+  publishedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relazioni
+  address           Address?
+  photos            Photo[]
+  features          ListingFeature[]
+  favorites         Favorite[]
+  inquiries         Inquiry[]
+  virtualTour       VirtualTour?
+  featuredListings  FeaturedListing[]
+  listingCategories ListingCategory[]
+
+  @@index([userId])
+  @@index([status])
+  @@index([listingType])
+  @@index([price])
+  @@index([createdAt])
+  @@map("listings")
+}
+
+model Address {
+  id        String  @id @default(cuid())
+  listingId String  @unique
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  country      String  @default("Italia")
+  region       String // Regione (es. Lombardia)
+  province     String // Provincia (es. MI)
+  city         String // Città (es. Milano)
+  neighborhood String? // Quartiere (es. Brera)
+  street       String? // Via (opzionale per privacy)
+  zipCode      String? // CAP
+
+  // Geocoding
+  latitude  Float?
+  longitude Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([city])
+  @@index([region])
+  @@map("addresses")
+}
+
+model Photo {
+  id        String  @id @default(cuid())
+  listingId String
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  url      String
+  altText  String?
+  position Int     @default(0)
+  isCover  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  @@index([listingId])
+  @@map("photos")
+}
+
+model Feature {
+  id   String  @id @default(cuid())
+  name String  @unique // Es. "Piscina", "Camino", "Portineria"
+  icon String? // Nome icona Lucide
+
+  listings ListingFeature[]
+
+  @@map("features")
+}
+
+model ListingFeature {
+  listingId String
+  featureId String
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  feature Feature @relation(fields: [featureId], references: [id], onDelete: Cascade)
+
+  @@id([listingId, featureId])
+  @@map("listing_features")
+}
+
+model VirtualTour {
+  id        String  @id @default(cuid())
+  listingId String  @unique
+  listing   Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  type      String // "matterport", "youtube", "custom"
+  embedUrl  String?
+  createdAt DateTime @default(now())
+
+  @@map("virtual_tours")
+}
+
+// ============================================
+// FAVORITI E RICHIESTE
+// ============================================
+
+model Favorite {
+  id        String   @id @default(cuid())
+  userId    String
+  listingId String
+  createdAt DateTime @default(now())
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, listingId])
+  @@map("favorites")
+}
+
+enum InquiryStatus {
+  PENDING // Inviata, in attesa risposta
+  REPLIED // Risposta ricevuta
+  VISIT_SCHEDULED // Visita fissata
+  VISIT_COMPLETED
+  CANCELLED
+  ARCHIVED
+}
+
+model Inquiry {
+  id         String @id @default(cuid())
+  listingId  String
+  senderId   String // Chi invia la richiesta
+  receiverId String // Chi riceve (proprietario/agenzia)
+
+  listing  Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  sender   User    @relation("SentInquiries", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User    @relation("ReceivedInquiries", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  // Dati richiesta
+  name    String
+  email   String
+  phone   String?
+  message String  @db.Text
+
+  // Visita
+  visitDate DateTime?
+  visitTime String?
+
+  status InquiryStatus @default(PENDING)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([receiverId, status])
+  @@index([senderId])
+  @@map("inquiries")
+}
+
+// ============================================
+// MESSAGGISTICA
+// ============================================
+
+model Message {
+  id         String    @id @default(cuid())
+  senderId   String
+  receiverId String
+  content    String    @db.Text
+  read       Boolean   @default(false)
+  readAt     DateTime?
+
+  sender   User @relation("SentMessages", fields: [senderId], references: [id], onDelete: Cascade)
+  receiver User @relation("ReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@index([senderId, receiverId])
+  @@index([receiverId, read])
+  @@map("messages")
+}
+
+// ============================================
+// ABBONAMENTI E PAGAMENTI
+// ============================================
+
+enum PlanType {
+  FREE // Piano gratuito
+  BASIC // Base
+  PRO // Professionale
+  ENTERPRISE // Enterprise
+}
+
+enum SubscriptionStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+  TRIALING
+  INCOMPLETE
+}
+
+model Plan {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  type        PlanType
+  description String?
+
+  // Prezzi (in centesimi)
+  priceMonthly Int @default(0)
+  priceYearly  Int @default(0)
+
+  // Limiti
+  maxListings   Int @default(5)
+  maxPhotos     Int @default(10)
+  featuredSlots Int @default(0)
+
+  // Features
+  features String[] // Lista di feature incluse
+
+  // Stripe
+  stripePriceMonthly String?
+  stripePriceYearly  String?
+
+  active    Boolean @default(true)
+  sortOrder Int     @default(0)
+
+  subscriptions Subscription[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("plans")
+}
+
+model Subscription {
+  id     String @id @default(cuid())
+  userId String @unique
+  planId String
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan Plan @relation(fields: [planId], references: [id])
+
+  status SubscriptionStatus @default(ACTIVE)
+
+  // Date
+  currentPeriodStart DateTime  @default(now())
+  currentPeriodEnd   DateTime?
+  trialEnd           DateTime?
+  cancelledAt        DateTime?
+
+  // Stripe
+  stripeCustomerId     String? @unique
+  stripeSubscriptionId String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
+  @@map("subscriptions")
+}
+
+enum PaymentStatus {
+  PENDING
+  COMPLETED
+  FAILED
+  REFUNDED
+}
+
+model Payment {
+  id             String  @id @default(cuid())
+  userId         String
+  subscriptionId String?
+
+  amount   Int // in centesimi
+  currency String        @default("eur")
+  status   PaymentStatus @default(PENDING)
+
+  // Stripe
+  stripePaymentIntentId String? @unique
+
+  // Descrizione
+  description String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  subscription Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  @@index([userId])
+  @@map("payments")
+}
+
+// ============================================
+// ANNUNCI IN EVIDENZA
+// ============================================
+
+model FeaturedListing {
+  id        String   @id @default(cuid())
+  listingId String
+  startDate DateTime
+  endDate   DateTime
+  position  Int      @default(0)
+
+  paymentId String?
+
+  listing Listing @relation(fields: [listingId], references: [id], onDelete: Cascade)
+
+  @@index([startDate, endDate])
+  @@map("featured_listings")
+}
+
+// ============================================
+// NOTIFICHE
+// ============================================
+
+enum NotificationType {
+  INQUIRY_RECEIVED
+  MESSAGE_RECEIVED
+  LISTING_APPROVED
+  LISTING_REJECTED
+  SUBSCRIPTION_EXPIRING
+  FAVORITE_PRICE_DROP
+  SYSTEM
+}
+
+model Notification {
+  id     String           @id @default(cuid())
+  userId String
+  type   NotificationType
+  title  String
+  body   String?
+  link   String?
+  read   Boolean          @default(false)
+  readAt DateTime?
+
+  metadata Json? // Dati extra
+
+  createdAt DateTime @default(now())
+
+  @@index([userId, read])
+  @@map("notifications")
+}
+
+// ============================================
+// CATEGORIE E TAG
+// ============================================
+
+model Category {
+  id        String  @id @default(cuid())
+  name      String  @unique
+  slug      String  @unique
+  icon      String?
+  sortOrder Int     @default(0)
+
+  listings ListingCategory[]
+
+  @@map("categories")
+}
+
+model ListingCategory {
+  listingId  String
+  categoryId String
+
+  listing  Listing  @relation(fields: [listingId], references: [id], onDelete: Cascade)
+  category Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@id([listingId, categoryId])
+  @@map("listing_categories")
+}
+
+// ============================================
+// LOG E AUDIT
+// ============================================
+
+model AuditLog {
+  id        String  @id @default(cuid())
+  userId    String?
+  action    String // Es. "listing.created", "user.banned"
+  entity    String // Es. "listing", "user"
+  entityId  String?
+  metadata  Json?
+  ipAddress String?
+  userAgent String?
+
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@map("audit_logs")
+}
