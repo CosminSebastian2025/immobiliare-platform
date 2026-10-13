@@ -1,8 +1,9 @@
 // src/components/listings/listing-card.tsx
 
 import Link from 'next/link'
-import { Heart, MapPin, Bed, Bath, Ruler } from 'lucide-react'
-import { formatPrice } from '@/lib/stripe'
+import {Bath, Bed, Heart, MapPin, Ruler} from 'lucide-react'
+import {formatPrice} from '@/lib/stripe'
+import {analytics} from '@/lib/analytics'
 
 interface ListingCardProps {
     listing: {
@@ -35,9 +36,14 @@ export default function ListingCard({ listing }: ListingCardProps) {
             ? `${formatPrice(listing.price)}/notte`
             : formatPrice(listing.price)
 
+    const handleView = () => {
+        analytics.listingViewed(listing.id, listing.title, listing.price)
+    }
+
     return (
         <Link
             href={`/listing/${listing.slug}`}
+            onClick={handleView}
             className="group block bg-white rounded-xl overflow-hidden shadow-sm hover:shadow-md transition-shadow"
         >
             {/* Immagine */}
